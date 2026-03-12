@@ -13,32 +13,33 @@ from Bio.Phylo.TreeConstruction import DistanceCalculator, DistanceTreeConstruct
 from Bio import Phylo
 
 st.title("Mobile Genetic Element Analysis Web App")
-st.write("Upload a plasmid FASTA sequence to analyze ORFs and detect potential MGEs")
+st.write("Upload plasmid FASTA sequence to analyze ORFs and detect Mobile Genetic Elements")
 
 # ---------------- Upload FASTA ----------------
 uploaded_file = st.file_uploader("Upload FASTA file", type=["fasta","fa","txt"])
 
-
-# ---------------- CLEAN SEQUENCE ----------------
+# ---------------- Clean Sequence ----------------
 def clean_sequence(seq):
     seq = seq.upper()
     seq = re.sub(r'[^ATGC]', '', seq)
     return seq
 
 
-# ---------------- ORF PREDICTION ----------------
+# ---------------- ORF Prediction ----------------
 def predict_orfs(sequence):
 
     start_codons = ["ATG"]
     stop_codons = ["TAA","TAG","TGA"]
 
-    seq_len = len(sequence)
     proteins = []
-    orf_info = []
+    orf_data = []
+
+    seq_len = len(sequence)
 
     for frame in range(3):
 
         i = frame
+
         while i < seq_len-3:
 
             codon = sequence[i:i+3]
@@ -59,7 +60,8 @@ def predict_orfs(sequence):
 
                             proteins.append(protein)
 
-                            orf_info.append({
+                            orf_data.append({
+                                "ORF_ID": f"ORF_{len(proteins)}",
                                 "Start": i,
                                 "End": j+3,
                                 "Length_nt": len(orf_seq),
@@ -69,41 +71,42 @@ def predict_orfs(sequence):
 
                         i = j
                         break
+
             i += 3
 
-    return proteins, orf_info
+    return proteins, orf_data
 
 
-# ---------------- MGE MOTIF DETECTION ----------------
+# ---------------- MGE Detection ----------------
 def predict_mge_type(protein):
 
     motifs = {
-        "Transposase": ["DDE","DDD","DEK"],
-        "Integrase": ["RHRY","YREK"],
-        "Recombinase": ["HNH","RHR"],
+        "Transposase":["DDE","DDD"],
+        "Integrase":["RHRY"],
+        "Recombinase":["HNH"]
     }
 
     for mge, motif_list in motifs.items():
         for motif in motif_list:
             if motif in protein:
-                return mge, "DNA mobility"
+                return mge,"DNA Mobility"
 
     length = len(protein)
 
     if length > 300:
-        return "Possible Transposase", "Transposition"
+        return "Possible Transposase","Transposition"
 
     if length > 200:
-        return "Possible Integrase", "Integration"
+        return "Possible Integrase","Integration"
 
     if length > 120:
-        return "Insertion Sequence Protein", "Mobility"
+        return "Insertion Sequence Protein","Mobility"
 
-    return "Unknown Protein", "Unknown Function"
+    return "Unknown Protein","Unknown"
 
 
-# ---------------- PHYLOGENETIC TREE ----------------
-def build_phylogenetic_tree(proteins):
+# ---------------- Phylogenetic Tree ----------------
+def build_tree(proteins):
 
     max_len = max(len(p) for p in proteins)
 
@@ -121,11 +124,11 @@ def build_phylogenetic_tree(proteins):
 
     calculator = DistanceCalculator("identity")
 
-    distance_matrix = calculator.get_distance(alignment)
+    dm = calculator.get_distance(alignment)
 
     constructor = DistanceTreeConstructor()
 
-    tree = constructor.upgma(distance_matrix)
+    tree = constructor.upgma(dm)
 
     return tree
 
@@ -140,14 +143,17 @@ if uploaded_file:
         records = list(SeqIO.parse(fasta_text,"fasta"))
 
         if len(records)==0:
+
             st.error("No sequence detected")
+
             st.stop()
 
         raw_seq = str(records[0].seq)
 
         seq = clean_sequence(raw_seq)
 
-        # ---------------- STEP 1 ----------------
+
+        # STEP 1
         st.header("Step 1: Plasmid Information")
 
         st.write("Sequence Length:",len(seq))
@@ -157,11 +163,10 @@ if uploaded_file:
         st.write("GC Content:",round(gc*100,2),"%")
 
 
+        # STEP 2
+        st.header("Step 2: Automated ORF Prediction")
 
-        # ---------------- STEP 2 ----------------
-        st.header("Step 2: ORF Prediction")
-
-        proteins, orf_info = predict_orfs(seq)
+        proteins, orf_data = predict_orfs(seq)
 
         st.write("Number of ORFs detected:",len(proteins))
 
@@ -169,27 +174,24 @@ if uploaded_file:
 
             st.warning("No ORFs detected")
 
-            st.stop()
-
-        df_orf = pd.DataFrame(orf_info)
+        df_orf = pd.DataFrame(orf_data)
 
         st.dataframe(df_orf)
 
 
-
-        # ---------------- STEP 3 ----------------
+        # STEP 3
         st.header("Step 3: MGE Identification")
 
         results = []
 
         for i,p in enumerate(proteins):
 
-            mge_type,function = predict_mge_type(p)
+            mge,function = predict_mge_type(p)
 
             results.append([
                 f"ORF_{i+1}",
                 len(p),
-                mge_type,
+                mge,
                 function,
                 p
             ])
@@ -208,23 +210,23 @@ if uploaded_file:
         st.dataframe(df_mge)
 
 
+        # Highlight main ORF
+        if len(df_mge)>0:
 
-        # Highlight largest ORF
-        main_orf = df_mge.loc[df_mge["Protein_Length"].idxmax()]
+            main_orf = df_mge.loc[df_mge["Protein_Length"].idxmax()]
 
-        st.subheader("Detected Major ORF")
+            st.subheader("Detected MGE ORF")
 
-        st.success(f"Main ORF: {main_orf['ORF_ID']}")
+            st.success(f"MGE detected in {main_orf['ORF_ID']}")
 
-        st.write("Predicted Type:",main_orf["MGE_Type"])
+            st.write("MGE Type:",main_orf["MGE_Type"])
 
-        st.write("Function:",main_orf["Function"])
+            st.write("Function:",main_orf["Function"])
 
-        st.code(main_orf["Protein_Sequence"])
-
+            st.code(main_orf["Protein_Sequence"])
 
 
-        # ---------------- STEP 4 ----------------
+        # STEP 4
         st.header("Step 4: Phylogenetic Analysis")
 
         lengths = [len(p) for p in proteins]
@@ -237,10 +239,9 @@ if uploaded_file:
 
         ax.set_ylabel("Protein Length")
 
-        ax.set_title("Protein Length Evolution")
+        ax.set_title("Protein Evolution Plot")
 
         st.pyplot(fig)
-
 
 
         # Tree
@@ -248,23 +249,26 @@ if uploaded_file:
 
         if len(proteins) >= 3:
 
-            tree = build_phylogenetic_tree(proteins)
+            try:
 
-            fig_tree = plt.figure(figsize=(8,6))
+                tree = build_tree(proteins)
 
-            ax_tree = fig_tree.add_subplot(111)
+                fig_tree, ax_tree = plt.subplots(figsize=(8,6))
 
-            Phylo.draw(tree, axes=ax_tree, do_show=False)
+                Phylo.draw(tree, axes=ax_tree)
 
-            st.pyplot(fig_tree)
+                st.pyplot(fig_tree)
+
+            except:
+
+                st.warning("Tree generation failed")
 
         else:
 
-            st.info("Need at least 3 ORFs for tree")
+            st.warning("Need at least 3 ORFs to generate phylogenetic tree")
 
 
-
-        # ---------------- STEP 5 ----------------
+        # STEP 5
         st.header("Step 5: Genome Visualization")
 
         fig2,ax2 = plt.subplots()
@@ -275,23 +279,24 @@ if uploaded_file:
 
         ax2.set_ylabel("Gene Length")
 
-        ax2.set_title("Gene Distribution")
+        ax2.set_title("Plasmid Gene Distribution")
 
         st.pyplot(fig2)
 
 
-
-        # ---------------- STEP 6 ----------------
+        # STEP 6
         st.header("Download Results")
 
-        st.download_button(
-            "Download CSV",
-            df_mge.to_csv(index=False),
-            "MGE_results.csv"
-        )
+        csv = df_mge.to_csv(index=False).encode("utf-8")
 
+        st.download_button(
+            label="Download MGE Results CSV",
+            data=csv,
+            file_name="mge_results.csv",
+            mime="text/csv"
+        )
 
 
     except Exception as e:
 
-        st.error(f"Processing Error: {e}")
+        st.error(f"Processing error: {e}")
