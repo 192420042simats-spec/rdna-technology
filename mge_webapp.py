@@ -12,9 +12,6 @@ from Bio.Align import MultipleSeqAlignment
 from Bio.Phylo.TreeConstruction import DistanceCalculator, DistanceTreeConstructor
 from Bio import Phylo
 
-from Bio.Blast import NCBIWWW
-from Bio.Blast import NCBIXML
-
 
 st.title("Mobile Genetic Element Analysis Web App")
 
@@ -70,56 +67,25 @@ def predict_orfs(sequence):
     return proteins
 
 
-# ---------- MGE DETECTION ----------
-def detect_mge(protein):
+# ---------- FUNCTION PREDICTION ----------
+def predict_function(protein):
 
     length = len(protein)
 
     if 300 <= length <= 450:
-        return "Possible Transposase"
+        return "Transposase (possible)"
 
     elif 250 <= length < 300:
-        return "Possible Integrase"
+        return "Integrase (possible)"
 
     elif 200 <= length < 250:
-        return "Possible Recombinase"
+        return "Recombinase (possible)"
 
-    elif length > 450:
-        return "Mobile Element Protein"
+    elif 100 <= length < 200:
+        return "Hypothetical protein"
 
     else:
-        return "Unknown"
-
-
-# ---------- BLAST FUNCTION ----------
-def predict_function_blast(protein_seq):
-
-    try:
-
-        result_handle = NCBIWWW.qblast(
-            program="blastp",
-            database="nr",
-            sequence=protein_seq,
-            hitlist_size=1
-        )
-
-        blast_record = NCBIXML.read(result_handle)
-
-        if blast_record.alignments:
-
-            hit = blast_record.alignments[0]
-
-            title = hit.title
-
-            return title
-
-        else:
-
-            return "No significant similarity"
-
-    except:
-
-        return "BLAST prediction failed"
+        return "Unknown protein"
 
 
 # ---------- PHYLOGENETIC TREE ----------
@@ -162,12 +128,6 @@ if uploaded_file:
 
         records = list(SeqIO.parse(fasta_text, "fasta"))
 
-        if len(records) == 0:
-
-            st.error("No sequence detected in FASTA file")
-
-            st.stop()
-
         raw_seq = str(records[0].seq)
 
         seq = clean_sequence(raw_seq)
@@ -193,7 +153,6 @@ if uploaded_file:
         df_orf = pd.DataFrame({
 
             "ORF_ID":[f"ORF_{i+1}" for i in range(len(proteins))],
-
             "Protein_Length":[len(p) for p in proteins]
 
         })
@@ -201,29 +160,24 @@ if uploaded_file:
         st.dataframe(df_orf)
 
 
-        # STEP 3 + STEP 4
-        st.header("Step 3: MGE Detection + Functional Annotation")
+        # STEP 3
+        st.header("Step 3: MGE Detection + Function Prediction")
 
         results = []
 
-        for i, p in enumerate(proteins):
+        for i,p in enumerate(proteins):
 
             orf_id = f"ORF_{i+1}"
 
-            length = len(p)
+            function = predict_function(p)
 
-            mge_label = detect_mge(p)
-
-            with st.spinner(f"Running BLAST for {orf_id}..."):
-
-                function = predict_function_blast(p)
+            blast_link = f"https://blast.ncbi.nlm.nih.gov/Blast.cgi?PROGRAM=blastp&QUERY={p}"
 
             results.append([
                 orf_id,
-                length,
-                mge_label,
+                len(p),
                 function,
-                p
+                blast_link
             ])
 
         df_mge = pd.DataFrame(
@@ -233,21 +187,18 @@ if uploaded_file:
             columns=[
                 "ORF_ID",
                 "Protein_Length",
-                "Predicted_MGE",
-                "BLAST_Function",
-                "Protein_Sequence"
+                "Predicted_Function",
+                "BLAST_Link"
             ]
         )
 
         st.dataframe(df_mge)
 
 
-        # STEP 5
-        st.header("Step 5: Phylogenetic Analysis")
+        # STEP 4
+        st.header("Step 4: Phylogenetic Analysis")
 
         lengths = [len(p) for p in proteins]
-
-        st.subheader("Phylogenetic Distance Graph")
 
         fig, ax = plt.subplots()
 
@@ -257,7 +208,7 @@ if uploaded_file:
 
         ax.set_ylabel("Protein Length")
 
-        ax.set_title("Evolutionary Distance Plot")
+        ax.set_title("Protein Evolution Plot")
 
         st.pyplot(fig)
 
@@ -278,11 +229,11 @@ if uploaded_file:
 
         else:
 
-            st.write("At least 3 ORFs required to generate phylogenetic tree.")
+            st.write("Need at least 3 ORFs for tree.")
 
 
-        # STEP 6
-        st.header("Step 6: Genome Visualization")
+        # STEP 5
+        st.header("Step 5: Genome Visualization")
 
         fig2, ax2 = plt.subplots()
 
@@ -302,7 +253,7 @@ if uploaded_file:
 
         st.download_button(
 
-            "Download MGE Results",
+            "Download Results",
 
             df_mge.to_csv(index=False),
 
