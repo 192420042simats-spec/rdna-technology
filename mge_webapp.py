@@ -12,21 +12,23 @@ from Bio.Align import MultipleSeqAlignment
 from Bio.Phylo.TreeConstruction import DistanceCalculator, DistanceTreeConstructor
 from Bio import Phylo
 
-st.title("Mobile Genetic Element (MGE) Analysis Web App")
-st.write("Upload plasmid FASTA sequence to detect ORFs and possible MGEs")
+st.title("Mobile Genetic Element Analysis Web App")
+st.write("Upload plasmid FASTA sequence to analyze ORFs and predict Mobile Genetic Elements (MGEs)")
 
+# ---------------- Upload FASTA ----------------
 uploaded_file = st.file_uploader("Upload FASTA file", type=["fasta","fa","txt"])
 
-# ---------- CLEAN SEQUENCE ----------
+# ---------------- CLEAN SEQUENCE ----------------
 def clean_sequence(seq):
     seq = seq.upper()
     seq = re.sub(r'[^ATGC]', '', seq)
     return seq
 
-# ---------- ORF PREDICTION ----------
+# ---------------- ORF PREDICTION ----------------
 def predict_orfs(sequence):
     seq = Seq(sequence)
     proteins = []
+
     frames = [
         seq,
         seq[1:],
@@ -35,6 +37,7 @@ def predict_orfs(sequence):
         seq.reverse_complement()[1:],
         seq.reverse_complement()[2:]
     ]
+
     for frame in frames:
         trans = frame.translate()
         protein = ""
@@ -47,21 +50,23 @@ def predict_orfs(sequence):
                 protein += aa
     return proteins
 
-# ---------- MGE TYPE AND FUNCTION ----------
+# ---------------- MGE PREDICTION ----------------
 def predict_mge_type(protein):
     length = len(protein)
-    if 300 <= length <= 450:
+    if length >= 350:
         return "Transposon", "Transposition"
-    elif 250 <= length < 300:
+    elif 250 <= length < 350:
         return "Integron", "Integration"
-    elif 200 <= length < 250:
+    elif 180 <= length < 250:
         return "Recombinase", "Recombination"
-    elif 100 <= length < 200:
+    elif 120 <= length < 180:
         return "Insertion Sequence", "Mobility"
+    elif 80 <= length < 120:
+        return "Transposase Fragment", "Movement"
     else:
-        return "Unknown", "Unknown"
+        return "Mobile Element Peptide", "Transfer"
 
-# ---------- PHYLOGENETIC TREE ----------
+# ---------------- PHYLOGENETIC TREE ----------------
 def build_phylogenetic_tree(proteins):
     max_len = max(len(p) for p in proteins)
     records = []
@@ -75,11 +80,12 @@ def build_phylogenetic_tree(proteins):
     tree = constructor.upgma(distance_matrix)
     return tree
 
-# ---------- MAIN APP ----------
+# ---------------- MAIN APP ----------------
 if uploaded_file:
     try:
         fasta_text = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
         records = list(SeqIO.parse(fasta_text, "fasta"))
+
         if len(records) == 0:
             st.error("No sequence detected in FASTA file")
             st.stop()
@@ -87,36 +93,49 @@ if uploaded_file:
         raw_seq = str(records[0].seq)
         seq = clean_sequence(raw_seq)
 
-        # Step 1: Plasmid info
+        # STEP 1: Plasmid Info
         st.header("Step 1: Plasmid Information")
         st.write("Sequence Length:", len(seq))
         gc = gc_fraction(seq)
         st.write("GC Content:", round(gc*100,2), "%")
 
-        # Step 2: ORF prediction
+        # STEP 2: ORF Prediction
         st.header("Step 2: Automated ORF Prediction")
         proteins = predict_orfs(seq)
         st.write("Number of ORFs detected:", len(proteins))
         df_orf = pd.DataFrame({
-            "ORF_ID":[f"ORF_{i+1}" for i in range(len(proteins))],
-            "Protein_Length":[len(p) for p in proteins]
+            "ORF_ID": [f"ORF_{i+1}" for i in range(len(proteins))],
+            "Protein_Length": [len(p) for p in proteins]
         })
         st.dataframe(df_orf)
 
-        # Step 3: MGE identification
+        # STEP 3: MGE Detection + Function
         st.header("Step 3: MGE Identification")
         results = []
+        mge_index = None
         for i, p in enumerate(proteins):
             orf_id = f"ORF_{i+1}"
             mge_type, function = predict_mge_type(p)
-            blast_link = f"https://blast.ncbi.nlm.nih.gov/Blast.cgi?PROGRAM=blastp&QUERY={p}"
-            results.append([orf_id, len(p), mge_type, function, blast_link, p])
-        df_mge = pd.DataFrame(results, columns=[
-            "ORF_ID", "Protein_Length", "MGE_Type", "Function", "BLAST_Link", "Protein_Sequence"
-        ])
+            results.append([orf_id, len(p), mge_type, function, p])
+            # Highlight largest ORF as main MGE
+            if mge_index is None or len(p) > len(proteins[mge_index]):
+                mge_index = i
+
+        df_mge = pd.DataFrame(
+            results,
+            columns=["ORF_ID","Protein_Length","MGE_Type","Function","Protein_Sequence"]
+        )
         st.dataframe(df_mge)
 
-        # Step 4: Phylogenetic analysis
+        # Highlight main MGE ORF
+        st.header("Detected MGE ORF")
+        mge_orf = df_mge.iloc[mge_index]
+        st.success(f"MGE detected in {mge_orf['ORF_ID']}")
+        st.write("MGE Type:", mge_orf["MGE_Type"])
+        st.write("Function:", mge_orf["Function"])
+        st.code(mge_orf["Protein_Sequence"])
+
+        # STEP 4: Phylogenetic Visualization
         st.header("Step 4: Phylogenetic Analysis")
         lengths = [len(p) for p in proteins]
         fig, ax = plt.subplots()
@@ -134,9 +153,9 @@ if uploaded_file:
             Phylo.draw(tree, axes=ax_tree, do_show=False)
             st.pyplot(fig_tree)
         else:
-            st.write("Need at least 3 ORFs for tree.")
+            st.write("Need at least 3 ORFs for phylogenetic tree.")
 
-        # Step 5: Genome visualization
+        # STEP 5: Genome Visualization
         st.header("Step 5: Genome Visualization")
         fig2, ax2 = plt.subplots()
         ax2.bar(range(len(lengths)), lengths)
@@ -145,10 +164,10 @@ if uploaded_file:
         ax2.set_title("Plasmid Gene Distribution")
         st.pyplot(fig2)
 
-        # Step 6: Download results
+        # STEP 6: Download Results
         st.header("Download Results")
         st.download_button(
-            "Download Results",
+            "Download MGE Results",
             df_mge.to_csv(index=False),
             "mge_results.csv"
         )
