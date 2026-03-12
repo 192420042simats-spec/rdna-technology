@@ -7,9 +7,10 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqUtils import gc_fraction
 
+
 st.title("Mobile Genetic Element Analysis Web App")
 
-st.write("Upload plasmid DNA FASTA file")
+st.write("Upload plasmid DNA FASTA sequence")
 
 
 uploaded_file = st.file_uploader(
@@ -18,10 +19,24 @@ uploaded_file = st.file_uploader(
 )
 
 
+# ---------------- DNA VALIDATION ----------------
+
+def validate_dna(seq):
+
+    valid = set("ATGC")
+
+    if not set(seq).issubset(valid):
+        return False
+
+    return True
+
+
 # ---------------- ORF PREDICTION ----------------
+
 def predict_orfs(sequence):
 
     seq = Seq(sequence)
+
     proteins = []
 
     frames = [
@@ -35,16 +50,19 @@ def predict_orfs(sequence):
 
     for frame in frames:
 
-        trans = frame.translate(to_stop=False)
+        translation = frame.translate(to_stop=False)
 
         protein = ""
 
-        for aa in str(trans):
+        for aa in str(translation):
 
             if aa == "*":
+
                 if len(protein) > 50:
                     proteins.append(protein)
+
                 protein = ""
+
             else:
                 protein += aa
 
@@ -52,34 +70,37 @@ def predict_orfs(sequence):
 
 
 # ---------------- MGE DETECTION ----------------
-def detect_mge(proteins):
 
-    mge_keywords = [
-        "transposase",
-        "integrase",
-        "recombinase",
-        "insertion",
-        "phage"
-    ]
+def detect_mge(proteins):
 
     results = []
 
     for i, p in enumerate(proteins):
 
-        label = "Unknown"
+        length = len(p)
 
-        if len(p) > 300:
+        if 300 <= length <= 450:
             label = "Possible Transposase"
 
-        elif len(p) > 200:
+        elif 250 <= length < 300:
             label = "Possible Integrase"
 
-        results.append([f"ORF_{i+1}", len(p), label])
+        elif 200 <= length < 250:
+            label = "Possible Recombinase"
+
+        elif length > 450:
+            label = "Large Mobile Element Protein"
+
+        else:
+            label = "Unknown"
+
+        results.append([f"ORF_{i+1}", length, label, p])
 
     return results
 
 
 # ---------------- MAIN APP ----------------
+
 if uploaded_file:
 
     try:
@@ -90,15 +111,30 @@ if uploaded_file:
 
         records = list(SeqIO.parse(fasta_text, "fasta"))
 
+        if len(records) == 0:
+            st.error("No FASTA sequence detected")
+            st.stop()
+
         seq = str(records[0].seq).upper()
+
+        if not validate_dna(seq):
+
+            st.error("Uploaded file is not DNA FASTA.")
+            st.stop()
+
+        # ---------------- BASIC INFO ----------------
 
         st.header("Step 1: Basic Plasmid Information")
 
         st.write("Sequence Length:", len(seq))
-        st.write("GC Content:", round(gc_fraction(seq)*100,2), "%")
+
+        gc = gc_fraction(seq)
+
+        st.write("GC Content:", round(gc*100,2), "%")
 
 
-        # ORF Prediction
+        # ---------------- ORF PREDICTION ----------------
+
         st.header("Step 2: Automated ORF Prediction")
 
         proteins = predict_orfs(seq)
@@ -113,53 +149,81 @@ if uploaded_file:
         st.dataframe(df_orf)
 
 
-        # MGE Detection
+        # ---------------- MGE DETECTION ----------------
+
         st.header("Step 3: MGE Detection")
 
         mge_results = detect_mge(proteins)
 
         df_mge = pd.DataFrame(
             mge_results,
-            columns=["ORF_ID","Protein_Length","Predicted_Function"]
+            columns=["ORF_ID","Protein_Length","Predicted_Function","Protein_Sequence"]
         )
 
         st.dataframe(df_mge)
 
 
-        # Functional Annotation
+        # ---------------- FUNCTIONAL ANNOTATION ----------------
+
         st.header("Step 4: Functional Annotation")
 
-        st.write("Use BLAST to confirm function of detected ORFs.")
+        st.write("Click BLAST to verify function of detected ORFs.")
+
+        for i, row in df_mge.iterrows():
+
+            protein = row["Protein_Sequence"]
+
+            blast_link = f"https://blast.ncbi.nlm.nih.gov/Blast.cgi?PROGRAM=blastp&QUERY={protein}"
+
+            st.write(row["ORF_ID"], "→", blast_link)
 
 
-        # Phylogenetic Tree
+        # ---------------- PHYLOGENETIC ANALYSIS ----------------
+
         st.header("Step 5: Phylogenetic Analysis")
+
+        lengths = [len(p) for p in proteins]
 
         fig, ax = plt.subplots()
 
-        ax.plot(range(len(proteins)), [len(p) for p in proteins], marker="o")
+        ax.plot(range(len(lengths)), lengths, marker="o")
 
-        ax.set_xlabel("ORF")
+        ax.set_xlabel("ORF Index")
+
         ax.set_ylabel("Protein Length")
 
-        ax.set_title("Example Evolutionary Distance Plot")
+        ax.set_title("Protein Length Distance Plot")
 
         st.pyplot(fig)
 
 
-        # Visualization
+        # ---------------- GENOME VISUALIZATION ----------------
+
         st.header("Step 6: Genome Visualization")
 
         fig2, ax2 = plt.subplots()
 
-        ax2.bar(range(len(proteins)), [len(p) for p in proteins])
+        ax2.bar(range(len(lengths)), lengths)
 
         ax2.set_xlabel("Gene Index")
+
         ax2.set_ylabel("Gene Length")
 
-        ax2.set_title("Gene Distribution on Plasmid")
+        ax2.set_title("Plasmid Gene Distribution")
 
         st.pyplot(fig2)
+
+
+        # ---------------- DOWNLOAD RESULTS ----------------
+
+        st.header("Download Results")
+
+        st.download_button(
+            "Download ORF table",
+            df_mge.to_csv(index=False),
+            "mge_results.csv"
+        )
+
 
     except Exception as e:
 
