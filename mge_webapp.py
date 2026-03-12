@@ -4,6 +4,7 @@ from Bio.Seq import Seq
 from Bio.SeqUtils import gc_fraction
 import pandas as pd
 import matplotlib.pyplot as plt
+import io
 
 st.title("Mobile Genetic Element Analysis Web App")
 
@@ -11,23 +12,39 @@ st.write("Upload plasmid FASTA file to analyze ORFs and possible MGE genes")
 
 uploaded_file = st.file_uploader("Upload FASTA file", type=["fasta","fa","txt"])
 
+
+# -------- ORF Detection Function --------
 def find_orfs(sequence):
+
     orfs = []
     seq = Seq(sequence)
 
-    for frame in range(3):
-        trans = seq[frame:].translate()
+    frames = [seq,
+              seq[1:],
+              seq[2:],
+              seq.reverse_complement(),
+              seq.reverse_complement()[1:],
+              seq.reverse_complement()[2:]]
+
+    for frame in frames:
+
+        trans = frame.translate()
 
         start = 0
+
         while True:
+
             start = trans.find("M", start)
+
             if start == -1:
                 break
 
             stop = trans.find("*", start)
 
             if stop != -1:
+
                 length = stop - start
+
                 if length > 50:
                     protein = trans[start:stop]
                     orfs.append(str(protein))
@@ -37,50 +54,86 @@ def find_orfs(sequence):
     return orfs
 
 
-if uploaded_file:
+# -------- MAIN APP --------
+if uploaded_file is not None:
 
-    records = list(SeqIO.parse(uploaded_file, "fasta"))
+    try:
 
-    seq = str(records[0].seq)
+        # Convert uploaded binary file to text
+        fasta_text = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
 
-    st.subheader("Basic Plasmid Information")
+        records = list(SeqIO.parse(fasta_text, "fasta"))
 
-    length = len(seq)
-    gc = gc_fraction(seq)
+        if len(records) == 0:
+            st.error("No FASTA sequence detected")
+            st.stop()
 
-    st.write("Sequence Length:", length)
-    st.write("GC Content:", round(gc*100,2), "%")
+        seq = str(records[0].seq)
 
-    st.subheader("ORF Detection")
+        st.subheader("Basic Plasmid Information")
 
-    orfs = find_orfs(seq)
+        length = len(seq)
+        gc = gc_fraction(seq)
 
-    st.write("Number of ORFs found:", len(orfs))
+        st.write("Sequence Length:", length)
+        st.write("GC Content:", round(gc * 100, 2), "%")
 
-    if len(orfs) > 0:
+        # -------- ORF Detection --------
+        st.subheader("ORF Detection")
 
-        df = pd.DataFrame({
-            "ORF_ID":[f"ORF_{i+1}" for i in range(len(orfs))],
-            "Protein_Sequence":orfs
-        })
+        orfs = find_orfs(seq)
 
-        st.dataframe(df)
+        st.write("Number of ORFs found:", len(orfs))
 
-        st.download_button(
-            label="Download ORF sequences",
-            data=df.to_csv(index=False),
-            file_name="orf_sequences.csv"
-        )
+        if len(orfs) > 0:
 
-    st.subheader("Possible Mobile Element Proteins")
+            df = pd.DataFrame({
+                "ORF_ID": [f"ORF_{i+1}" for i in range(len(orfs))],
+                "Protein_Sequence": orfs
+            })
 
-    keywords = ["transposase","integrase","recombinase"]
+            st.dataframe(df)
 
-    st.write("Check these proteins using BLAST for MGE identification")
+            st.download_button(
+                label="Download ORF sequences",
+                data=df.to_csv(index=False),
+                file_name="orf_sequences.csv",
+                mime="text/csv"
+            )
 
-    st.subheader("Phylogenetic Tree Placeholder")
+        else:
+            st.warning("No ORFs detected")
 
-    fig, ax = plt.subplots()
-    ax.plot([1,2,3],[2,4,3])
-    ax.set_title("Example Phylogenetic Tree Visualization")
-    st.pyplot(fig)
+        # -------- MGE Keyword Suggestion --------
+        st.subheader("Possible Mobile Genetic Element Proteins")
+
+        st.write("Check these protein types using BLAST:")
+
+        keywords = [
+            "Transposase",
+            "Integrase",
+            "Recombinase",
+            "Insertion sequence protein",
+            "Phage protein"
+        ]
+
+        for k in keywords:
+            st.write("-", k)
+
+        # -------- Visualization --------
+        st.subheader("Example Phylogenetic Tree Visualization")
+
+        fig, ax = plt.subplots()
+
+        ax.plot([1,2,3,4],[3,5,2,6], marker="o")
+
+        ax.set_xlabel("Sequence")
+        ax.set_ylabel("Distance")
+
+        ax.set_title("Example Phylogenetic Tree")
+
+        st.pyplot(fig)
+
+    except Exception as e:
+        st.error(f"Error processing file: {e}")
+       
