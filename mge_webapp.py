@@ -12,6 +12,9 @@ from Bio.Align import MultipleSeqAlignment
 from Bio.Phylo.TreeConstruction import DistanceCalculator, DistanceTreeConstructor
 from Bio import Phylo
 
+from Bio.Blast import NCBIWWW
+from Bio.Blast import NCBIXML
+
 
 st.title("Mobile Genetic Element Analysis Web App")
 
@@ -20,7 +23,7 @@ st.write("Upload plasmid FASTA sequence to analyze ORFs and possible MGE genes")
 uploaded_file = st.file_uploader("Upload FASTA file", type=["fasta","fa","txt"])
 
 
-# -------- CLEAN SEQUENCE --------
+# ---------- CLEAN SEQUENCE ----------
 def clean_sequence(seq):
 
     seq = seq.upper()
@@ -30,7 +33,7 @@ def clean_sequence(seq):
     return seq
 
 
-# -------- ORF PREDICTION --------
+# ---------- ORF PREDICTION ----------
 def predict_orfs(sequence):
 
     seq = Seq(sequence)
@@ -67,36 +70,59 @@ def predict_orfs(sequence):
     return proteins
 
 
-# -------- MGE DETECTION --------
-def detect_mge(proteins):
+# ---------- MGE DETECTION ----------
+def detect_mge(protein):
 
-    results = []
+    length = len(protein)
 
-    for i, p in enumerate(proteins):
+    if 300 <= length <= 450:
+        return "Possible Transposase"
 
-        length = len(p)
+    elif 250 <= length < 300:
+        return "Possible Integrase"
 
-        if 300 <= length <= 450:
-            label = "Possible Transposase"
+    elif 200 <= length < 250:
+        return "Possible Recombinase"
 
-        elif 250 <= length < 300:
-            label = "Possible Integrase"
+    elif length > 450:
+        return "Mobile Element Protein"
 
-        elif 200 <= length < 250:
-            label = "Possible Recombinase"
+    else:
+        return "Unknown"
 
-        elif length > 450:
-            label = "Mobile Element Protein"
+
+# ---------- BLAST FUNCTION ----------
+def predict_function_blast(protein_seq):
+
+    try:
+
+        result_handle = NCBIWWW.qblast(
+            program="blastp",
+            database="nr",
+            sequence=protein_seq,
+            hitlist_size=1
+        )
+
+        blast_record = NCBIXML.read(result_handle)
+
+        if blast_record.alignments:
+
+            hit = blast_record.alignments[0]
+
+            title = hit.title
+
+            return title
 
         else:
-            label = "Unknown"
 
-        results.append([f"ORF_{i+1}", length, label, p])
+            return "No significant similarity"
 
-    return results
+    except:
+
+        return "BLAST prediction failed"
 
 
-# -------- PHYLOGENETIC TREE --------
+# ---------- PHYLOGENETIC TREE ----------
 def build_phylogenetic_tree(proteins):
 
     max_len = max(len(p) for p in proteins)
@@ -105,14 +131,14 @@ def build_phylogenetic_tree(proteins):
 
     for i, p in enumerate(proteins):
 
-        padded_seq = p.ljust(max_len, "-")
+        padded = p.ljust(max_len, "-")
 
-        record = SeqRecord(
-            Seq(padded_seq),
-            id=f"ORF_{i+1}"
+        records.append(
+            SeqRecord(
+                Seq(padded),
+                id=f"ORF_{i+1}"
+            )
         )
-
-        records.append(record)
 
     alignment = MultipleSeqAlignment(records)
 
@@ -127,7 +153,7 @@ def build_phylogenetic_tree(proteins):
     return tree
 
 
-# -------- MAIN APP --------
+# ---------- MAIN APP ----------
 if uploaded_file:
 
     try:
@@ -167,6 +193,7 @@ if uploaded_file:
         df_orf = pd.DataFrame({
 
             "ORF_ID":[f"ORF_{i+1}" for i in range(len(proteins))],
+
             "Protein_Length":[len(p) for p in proteins]
 
         })
@@ -174,32 +201,45 @@ if uploaded_file:
         st.dataframe(df_orf)
 
 
-        # STEP 3
-        st.header("Step 3: MGE Detection")
+        # STEP 3 + STEP 4
+        st.header("Step 3: MGE Detection + Functional Annotation")
 
-        mge_results = detect_mge(proteins)
+        results = []
+
+        for i, p in enumerate(proteins):
+
+            orf_id = f"ORF_{i+1}"
+
+            length = len(p)
+
+            mge_label = detect_mge(p)
+
+            with st.spinner(f"Running BLAST for {orf_id}..."):
+
+                function = predict_function_blast(p)
+
+            results.append([
+                orf_id,
+                length,
+                mge_label,
+                function,
+                p
+            ])
 
         df_mge = pd.DataFrame(
 
-            mge_results,
+            results,
 
-            columns=["ORF_ID","Protein_Length","Predicted_Function","Protein_Sequence"]
-
+            columns=[
+                "ORF_ID",
+                "Protein_Length",
+                "Predicted_MGE",
+                "BLAST_Function",
+                "Protein_Sequence"
+            ]
         )
 
         st.dataframe(df_mge)
-
-
-        # STEP 4
-        st.header("Step 4: Functional Annotation (BLAST)")
-
-        for i,row in df_mge.iterrows():
-
-            protein = row["Protein_Sequence"]
-
-            blast_link = f"https://blast.ncbi.nlm.nih.gov/Blast.cgi?PROGRAM=blastp&QUERY={protein}"
-
-            st.markdown(f"[Run BLAST for {row['ORF_ID']}]({blast_link})")
 
 
         # STEP 5
@@ -214,7 +254,9 @@ if uploaded_file:
         ax.plot(range(len(lengths)), lengths, marker="o")
 
         ax.set_xlabel("ORF Index")
+
         ax.set_ylabel("Protein Length")
+
         ax.set_title("Evolutionary Distance Plot")
 
         st.pyplot(fig)
@@ -247,7 +289,9 @@ if uploaded_file:
         ax2.bar(range(len(lengths)), lengths)
 
         ax2.set_xlabel("Gene Index")
+
         ax2.set_ylabel("Gene Length")
+
         ax2.set_title("Plasmid Gene Distribution")
 
         st.pyplot(fig2)
