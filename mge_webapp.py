@@ -1,139 +1,166 @@
 import streamlit as st
+import io
+import pandas as pd
+import matplotlib.pyplot as plt
+
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqUtils import gc_fraction
-import pandas as pd
-import matplotlib.pyplot as plt
-import io
 
 st.title("Mobile Genetic Element Analysis Web App")
 
-st.write("Upload plasmid FASTA file to analyze ORFs and possible MGE genes")
-
-uploaded_file = st.file_uploader("Upload FASTA file", type=["fasta","fa","txt"])
+st.write("Upload plasmid DNA FASTA file")
 
 
-# -------- ORF Detection Function --------
-def find_orfs(sequence):
+uploaded_file = st.file_uploader(
+    "Upload FASTA file",
+    type=["fasta","fa","txt"]
+)
 
-    orfs = []
+
+# ---------------- ORF PREDICTION ----------------
+def predict_orfs(sequence):
+
     seq = Seq(sequence)
+    proteins = []
 
-    frames = [seq,
-              seq[1:],
-              seq[2:],
-              seq.reverse_complement(),
-              seq.reverse_complement()[1:],
-              seq.reverse_complement()[2:]]
+    frames = [
+        seq,
+        seq[1:],
+        seq[2:],
+        seq.reverse_complement(),
+        seq.reverse_complement()[1:],
+        seq.reverse_complement()[2:]
+    ]
 
     for frame in frames:
 
-        trans = frame.translate()
+        trans = frame.translate(to_stop=False)
 
-        start = 0
+        protein = ""
 
-        while True:
+        for aa in str(trans):
 
-            start = trans.find("M", start)
+            if aa == "*":
+                if len(protein) > 50:
+                    proteins.append(protein)
+                protein = ""
+            else:
+                protein += aa
 
-            if start == -1:
-                break
-
-            stop = trans.find("*", start)
-
-            if stop != -1:
-
-                length = stop - start
-
-                if length > 50:
-                    protein = trans[start:stop]
-                    orfs.append(str(protein))
-
-            start += 1
-
-    return orfs
+    return proteins
 
 
-# -------- MAIN APP --------
-if uploaded_file is not None:
+# ---------------- MGE DETECTION ----------------
+def detect_mge(proteins):
+
+    mge_keywords = [
+        "transposase",
+        "integrase",
+        "recombinase",
+        "insertion",
+        "phage"
+    ]
+
+    results = []
+
+    for i, p in enumerate(proteins):
+
+        label = "Unknown"
+
+        if len(p) > 300:
+            label = "Possible Transposase"
+
+        elif len(p) > 200:
+            label = "Possible Integrase"
+
+        results.append([f"ORF_{i+1}", len(p), label])
+
+    return results
+
+
+# ---------------- MAIN APP ----------------
+if uploaded_file:
 
     try:
 
-        # Convert uploaded binary file to text
-        fasta_text = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
+        fasta_text = io.StringIO(
+            uploaded_file.getvalue().decode("utf-8")
+        )
 
         records = list(SeqIO.parse(fasta_text, "fasta"))
 
-        if len(records) == 0:
-            st.error("No FASTA sequence detected")
-            st.stop()
+        seq = str(records[0].seq).upper()
 
-        seq = str(records[0].seq)
+        st.header("Step 1: Basic Plasmid Information")
 
-        st.subheader("Basic Plasmid Information")
+        st.write("Sequence Length:", len(seq))
+        st.write("GC Content:", round(gc_fraction(seq)*100,2), "%")
 
-        length = len(seq)
-        gc = gc_fraction(seq)
 
-        st.write("Sequence Length:", length)
-        st.write("GC Content:", round(gc * 100, 2), "%")
+        # ORF Prediction
+        st.header("Step 2: Automated ORF Prediction")
 
-        # -------- ORF Detection --------
-        st.subheader("ORF Detection")
+        proteins = predict_orfs(seq)
 
-        orfs = find_orfs(seq)
+        st.write("Number of ORFs detected:", len(proteins))
 
-        st.write("Number of ORFs found:", len(orfs))
+        df_orf = pd.DataFrame({
+            "ORF_ID":[f"ORF_{i+1}" for i in range(len(proteins))],
+            "Protein_Length":[len(p) for p in proteins]
+        })
 
-        if len(orfs) > 0:
+        st.dataframe(df_orf)
 
-            df = pd.DataFrame({
-                "ORF_ID": [f"ORF_{i+1}" for i in range(len(orfs))],
-                "Protein_Sequence": orfs
-            })
 
-            st.dataframe(df)
+        # MGE Detection
+        st.header("Step 3: MGE Detection")
 
-            st.download_button(
-                label="Download ORF sequences",
-                data=df.to_csv(index=False),
-                file_name="orf_sequences.csv",
-                mime="text/csv"
-            )
+        mge_results = detect_mge(proteins)
 
-        else:
-            st.warning("No ORFs detected")
+        df_mge = pd.DataFrame(
+            mge_results,
+            columns=["ORF_ID","Protein_Length","Predicted_Function"]
+        )
 
-        # -------- MGE Keyword Suggestion --------
-        st.subheader("Possible Mobile Genetic Element Proteins")
+        st.dataframe(df_mge)
 
-        st.write("Check these protein types using BLAST:")
 
-        keywords = [
-            "Transposase",
-            "Integrase",
-            "Recombinase",
-            "Insertion sequence protein",
-            "Phage protein"
-        ]
+        # Functional Annotation
+        st.header("Step 4: Functional Annotation")
 
-        for k in keywords:
-            st.write("-", k)
+        st.write("Use BLAST to confirm function of detected ORFs.")
 
-        # -------- Visualization --------
-        st.subheader("Example Phylogenetic Tree Visualization")
+
+        # Phylogenetic Tree
+        st.header("Step 5: Phylogenetic Analysis")
 
         fig, ax = plt.subplots()
 
-        ax.plot([1,2,3,4],[3,5,2,6], marker="o")
+        ax.plot(range(len(proteins)), [len(p) for p in proteins], marker="o")
 
-        ax.set_xlabel("Sequence")
-        ax.set_ylabel("Distance")
+        ax.set_xlabel("ORF")
+        ax.set_ylabel("Protein Length")
 
-        ax.set_title("Example Phylogenetic Tree")
+        ax.set_title("Example Evolutionary Distance Plot")
 
         st.pyplot(fig)
 
+
+        # Visualization
+        st.header("Step 6: Genome Visualization")
+
+        fig2, ax2 = plt.subplots()
+
+        ax2.bar(range(len(proteins)), [len(p) for p in proteins])
+
+        ax2.set_xlabel("Gene Index")
+        ax2.set_ylabel("Gene Length")
+
+        ax2.set_title("Gene Distribution on Plasmid")
+
+        st.pyplot(fig2)
+
     except Exception as e:
-        st.error(f"Error processing file: {e}")
-       
+
+        st.error(f"Processing error: {e}")
