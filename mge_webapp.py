@@ -68,6 +68,7 @@ def predict_mge_type(protein):
 
 # ---------------- PHYLOGENETIC TREE ----------------
 def build_phylogenetic_tree(proteins):
+    # Pad sequences to same length with "-" for alignment
     max_len = max(len(p) for p in proteins)
     records = []
     for i, p in enumerate(proteins):
@@ -138,6 +139,8 @@ if uploaded_file:
         # STEP 4: Phylogenetic Visualization
         st.header("Step 4: Phylogenetic Analysis")
         lengths = [len(p) for p in proteins]
+
+        # Evolutionary Plot
         fig, ax = plt.subplots()
         ax.plot(range(len(lengths)), lengths, marker="o")
         ax.set_xlabel("ORF Index")
@@ -145,6 +148,7 @@ if uploaded_file:
         ax.set_title("Protein Evolution Plot")
         st.pyplot(fig)
 
+        # Phylogenetic Tree
         st.subheader("Phylogenetic Tree")
         if len(proteins) >= 3:
             tree = build_phylogenetic_tree(proteins)
