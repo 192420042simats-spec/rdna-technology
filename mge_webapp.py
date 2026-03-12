@@ -20,7 +20,7 @@ st.write("Upload plasmid FASTA sequence to analyze ORFs and possible MGE genes")
 uploaded_file = st.file_uploader("Upload FASTA file", type=["fasta","fa","txt"])
 
 
-# ---------------- CLEAN SEQUENCE ----------------
+# -------- CLEAN SEQUENCE --------
 def clean_sequence(seq):
 
     seq = seq.upper()
@@ -30,7 +30,7 @@ def clean_sequence(seq):
     return seq
 
 
-# ---------------- ORF PREDICTION ----------------
+# -------- ORF PREDICTION --------
 def predict_orfs(sequence):
 
     seq = Seq(sequence)
@@ -67,7 +67,7 @@ def predict_orfs(sequence):
     return proteins
 
 
-# ---------------- MGE DETECTION ----------------
+# -------- MGE DETECTION --------
 def detect_mge(proteins):
 
     results = []
@@ -96,19 +96,23 @@ def detect_mge(proteins):
     return results
 
 
-# ---------------- PHYLOGENETIC TREE ----------------
+# -------- PHYLOGENETIC TREE --------
 def build_phylogenetic_tree(proteins):
+
+    max_len = max(len(p) for p in proteins)
 
     records = []
 
     for i, p in enumerate(proteins):
 
-        records.append(
-            SeqRecord(
-                Seq(p),
-                id=f"ORF_{i+1}"
-            )
+        padded_seq = p.ljust(max_len, "-")
+
+        record = SeqRecord(
+            Seq(padded_seq),
+            id=f"ORF_{i+1}"
         )
+
+        records.append(record)
 
     alignment = MultipleSeqAlignment(records)
 
@@ -123,14 +127,12 @@ def build_phylogenetic_tree(proteins):
     return tree
 
 
-# ---------------- MAIN APP ----------------
+# -------- MAIN APP --------
 if uploaded_file:
 
     try:
 
-        fasta_text = io.StringIO(
-            uploaded_file.getvalue().decode("utf-8")
-        )
+        fasta_text = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
 
         records = list(SeqIO.parse(fasta_text, "fasta"))
 
@@ -144,7 +146,8 @@ if uploaded_file:
 
         seq = clean_sequence(raw_seq)
 
-        # ---------------- STEP 1 ----------------
+
+        # STEP 1
         st.header("Step 1: Plasmid Information")
 
         st.write("Sequence Length:", len(seq))
@@ -154,7 +157,7 @@ if uploaded_file:
         st.write("GC Content:", round(gc*100,2), "%")
 
 
-        # ---------------- STEP 2 ----------------
+        # STEP 2
         st.header("Step 2: Automated ORF Prediction")
 
         proteins = predict_orfs(seq)
@@ -164,7 +167,6 @@ if uploaded_file:
         df_orf = pd.DataFrame({
 
             "ORF_ID":[f"ORF_{i+1}" for i in range(len(proteins))],
-
             "Protein_Length":[len(p) for p in proteins]
 
         })
@@ -172,7 +174,7 @@ if uploaded_file:
         st.dataframe(df_orf)
 
 
-        # ---------------- STEP 3 ----------------
+        # STEP 3
         st.header("Step 3: MGE Detection")
 
         mge_results = detect_mge(proteins)
@@ -188,10 +190,8 @@ if uploaded_file:
         st.dataframe(df_mge)
 
 
-        # ---------------- STEP 4 ----------------
+        # STEP 4
         st.header("Step 4: Functional Annotation (BLAST)")
-
-        st.write("Click the links below to run BLAST search")
 
         for i,row in df_mge.iterrows():
 
@@ -202,12 +202,11 @@ if uploaded_file:
             st.markdown(f"[Run BLAST for {row['ORF_ID']}]({blast_link})")
 
 
-        # ---------------- STEP 5 ----------------
+        # STEP 5
         st.header("Step 5: Phylogenetic Analysis")
 
         lengths = [len(p) for p in proteins]
 
-        # Graph
         st.subheader("Phylogenetic Distance Graph")
 
         fig, ax = plt.subplots()
@@ -215,15 +214,12 @@ if uploaded_file:
         ax.plot(range(len(lengths)), lengths, marker="o")
 
         ax.set_xlabel("ORF Index")
-
         ax.set_ylabel("Protein Length")
-
         ax.set_title("Evolutionary Distance Plot")
 
         st.pyplot(fig)
 
 
-        # Tree
         st.subheader("Phylogenetic Tree")
 
         if len(proteins) >= 3:
@@ -243,7 +239,7 @@ if uploaded_file:
             st.write("At least 3 ORFs required to generate phylogenetic tree.")
 
 
-        # ---------------- STEP 6 ----------------
+        # STEP 6
         st.header("Step 6: Genome Visualization")
 
         fig2, ax2 = plt.subplots()
@@ -251,15 +247,13 @@ if uploaded_file:
         ax2.bar(range(len(lengths)), lengths)
 
         ax2.set_xlabel("Gene Index")
-
         ax2.set_ylabel("Gene Length")
-
         ax2.set_title("Plasmid Gene Distribution")
 
         st.pyplot(fig2)
 
 
-        # ---------------- DOWNLOAD ----------------
+        # DOWNLOAD
         st.header("Download Results")
 
         st.download_button(
