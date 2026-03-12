@@ -7,12 +7,15 @@ import re
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqUtils import gc_fraction
+from Bio.SeqRecord import SeqRecord
+from Bio.Align import MultipleSeqAlignment
+from Bio.Phylo.TreeConstruction import DistanceCalculator, DistanceTreeConstructor
+from Bio import Phylo
 
 
 st.title("Mobile Genetic Element Analysis Web App")
 
 st.write("Upload plasmid FASTA sequence to analyze ORFs and possible MGE genes")
-
 
 uploaded_file = st.file_uploader("Upload FASTA file", type=["fasta","fa","txt"])
 
@@ -93,6 +96,33 @@ def detect_mge(proteins):
     return results
 
 
+# ---------------- PHYLOGENETIC TREE ----------------
+def build_phylogenetic_tree(proteins):
+
+    records = []
+
+    for i, p in enumerate(proteins):
+
+        records.append(
+            SeqRecord(
+                Seq(p),
+                id=f"ORF_{i+1}"
+            )
+        )
+
+    alignment = MultipleSeqAlignment(records)
+
+    calculator = DistanceCalculator("identity")
+
+    distance_matrix = calculator.get_distance(alignment)
+
+    constructor = DistanceTreeConstructor()
+
+    tree = constructor.upgma(distance_matrix)
+
+    return tree
+
+
 # ---------------- MAIN APP ----------------
 if uploaded_file:
 
@@ -114,6 +144,7 @@ if uploaded_file:
 
         seq = clean_sequence(raw_seq)
 
+        # ---------------- STEP 1 ----------------
         st.header("Step 1: Plasmid Information")
 
         st.write("Sequence Length:", len(seq))
@@ -123,7 +154,7 @@ if uploaded_file:
         st.write("GC Content:", round(gc*100,2), "%")
 
 
-        # ORF Prediction
+        # ---------------- STEP 2 ----------------
         st.header("Step 2: Automated ORF Prediction")
 
         proteins = predict_orfs(seq)
@@ -141,7 +172,7 @@ if uploaded_file:
         st.dataframe(df_orf)
 
 
-        # MGE Detection
+        # ---------------- STEP 3 ----------------
         st.header("Step 3: MGE Detection")
 
         mge_results = detect_mge(proteins)
@@ -157,10 +188,10 @@ if uploaded_file:
         st.dataframe(df_mge)
 
 
-        # Functional Annotation
-        st.header("Step 4: Functional Annotation")
+        # ---------------- STEP 4 ----------------
+        st.header("Step 4: Functional Annotation (BLAST)")
 
-        st.write("Verify ORF functions using BLAST")
+        st.write("Click the links below to run BLAST search")
 
         for i,row in df_mge.iterrows():
 
@@ -168,13 +199,16 @@ if uploaded_file:
 
             blast_link = f"https://blast.ncbi.nlm.nih.gov/Blast.cgi?PROGRAM=blastp&QUERY={protein}"
 
-            st.write(row["ORF_ID"], "→", blast_link)
+            st.markdown(f"[Run BLAST for {row['ORF_ID']}]({blast_link})")
 
 
-        # Phylogenetic Visualization
+        # ---------------- STEP 5 ----------------
         st.header("Step 5: Phylogenetic Analysis")
 
         lengths = [len(p) for p in proteins]
+
+        # Graph
+        st.subheader("Phylogenetic Distance Graph")
 
         fig, ax = plt.subplots()
 
@@ -189,7 +223,27 @@ if uploaded_file:
         st.pyplot(fig)
 
 
-        # Genome Visualization
+        # Tree
+        st.subheader("Phylogenetic Tree")
+
+        if len(proteins) >= 3:
+
+            tree = build_phylogenetic_tree(proteins)
+
+            fig_tree = plt.figure(figsize=(8,6))
+
+            ax_tree = fig_tree.add_subplot(111)
+
+            Phylo.draw(tree, axes=ax_tree, do_show=False)
+
+            st.pyplot(fig_tree)
+
+        else:
+
+            st.write("At least 3 ORFs required to generate phylogenetic tree.")
+
+
+        # ---------------- STEP 6 ----------------
         st.header("Step 6: Genome Visualization")
 
         fig2, ax2 = plt.subplots()
@@ -205,12 +259,12 @@ if uploaded_file:
         st.pyplot(fig2)
 
 
-        # Download Results
+        # ---------------- DOWNLOAD ----------------
         st.header("Download Results")
 
         st.download_button(
 
-            "Download Results",
+            "Download MGE Results",
 
             df_mge.to_csv(index=False),
 
