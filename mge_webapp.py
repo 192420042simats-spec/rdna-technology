@@ -194,4 +194,3 @@ if uploaded_file is not None:
         "orf_results.csv",
         "text/csv"
         )
-
